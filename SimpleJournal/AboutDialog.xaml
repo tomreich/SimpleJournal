@@ -36,7 +36,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Image Source="/Gordon-Irving-IWork-10-Pages-brown.ico" Width="32" Height="32" Margin="20,0" Grid.Row="0" VerticalAlignment="Top" />
+        <Image Source="Images/Gordon-Irving-IWork-10-Pages-brown.ico" Width="32" Height="32" Margin="20,0" Grid.Row="0" VerticalAlignment="Top" />
 
         <Label Name="txtAbout" Grid.Column="1" Grid.Row="0" MinWidth="250" Content="Filled on load" />
 

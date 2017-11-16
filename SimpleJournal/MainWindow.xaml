@@ -48,6 +48,9 @@
                     <Separator />
                     <MenuItem Header="E_xit" Click="Exit_Click"/>
                 </MenuItem>
+                <MenuItem Header="E_dit">
+                    <MenuItem Header="_Find" Click="Find_Click" IsEnabled="False" x:Name="MenuItem_Find"/>
+                </MenuItem>
                 <MenuItem Header="_Entry">
                     <MenuItem Header="_New" Click="NewEntry_Click" IsEnabled="False" x:Name="MenuItem_NewEntry"/>
                     <MenuItem Header="_Revert" Click="RevertEntry_Click" IsEnabled="False" x:Name="MenuItem_Revert"/>

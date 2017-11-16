@@ -25,14 +25,9 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
 using Ionic.Zip;
 using System.IO;
-using System.Security.Cryptography;
 using Microsoft.Win32;
-using System.Configuration;
 
 namespace SimpleJournal
 {
@@ -62,20 +57,42 @@ namespace SimpleJournal
             if (string.IsNullOrWhiteSpace(pass))
                 return false;
 
-            _pw = pass;
-
             using (ZipFile file = ZipFile.Read(filePath))
             {
+                // Get the file names in the zip.
+                var fileNames = GetFileNames(file);
+
+                if(fileNames?.Any() != true)
+                {
+                    MessageBox.Show("No entries found in file!", "Open", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return false;
+                }
+
+                // Try to open one of the files to verify the password is correct.
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    try
+                    {
+                        file[0].ExtractWithPassword(ms, pass);
+                    }
+                    catch (BadPasswordException)
+                    {
+                        MessageBox.Show("Unable to load file.  Bad password?", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return false;
+                    }
+                }
+
                 // Put file names in list.
-                LoadFileList(GetFileNames(file));
+                LoadFileList(fileNames);
             }
 
+            _pw = pass;
             _journalFilePath = filePath;
-            MenuItem_Save.IsEnabled = MenuItem_Delete.IsEnabled = MenuItem_NewEntry.IsEnabled = MenuItem_Revert.IsEnabled = MenuItem_SelectAllDates.IsEnabled = true;
+            MenuItem_Save.IsEnabled = MenuItem_Delete.IsEnabled = MenuItem_NewEntry.IsEnabled = MenuItem_Revert.IsEnabled = MenuItem_SelectAllDates.IsEnabled = MenuItem_Find.IsEnabled = true;
 
             return true;
         }
-
+        
         private void LoadFileList(List<string> allFiles, SelectedDatesCollection filter = null)
         {
             // Put file names in list.
@@ -137,6 +154,37 @@ namespace SimpleJournal
                 }
             }
             return false;
+        }
+
+        private async Task<List<string>> SearchFilesInZip(ZipFile file, string term, string pw)
+        {
+            List<string> ret = new List<string>();
+            foreach (ZipEntry entry in file)
+            {
+                // Load the entry
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    try
+                    {
+                        entry.ExtractWithPassword(ms, pw);
+                    }
+                    catch (BadPasswordException)
+                    {
+                        MessageBox.Show("Unable to load entry.  Bad password?", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return ret;
+                    }
+
+                    ms.Position = 0;
+
+                    // TODO: Find a way to strip the RTF formatting properly.  Formatted stuff might not be found.
+                    StreamReader sr = new StreamReader(ms);
+                    string entryContents = await sr.ReadToEndAsync();
+
+                    if (entryContents.Contains(term))
+                        ret.Add(entry.FileName);
+                }
+            }
+            return ret;
         }
         #endregion
 
@@ -266,8 +314,17 @@ namespace SimpleJournal
             SaveSelectedEntry(false);
             if(!string.IsNullOrWhiteSpace(_journalFilePath) && BackupOnExit.IsChecked)
             {
+                // Save the backup file.
                 FileInfo fi = new FileInfo(_journalFilePath);
                 File.Copy(_journalFilePath, Path.Combine(fi.DirectoryName, fi.Name.Replace(fi.Extension, string.Empty) + "_" + DateTime.Now.ToString("s").Replace(':', '_') + fi.Extension));
+
+                // Delete old backup files.
+                var journalFiles = fi.Directory.GetFiles(fi.Name.Replace(fi.Extension, string.Empty) + "_*" + fi.Extension).OrderByDescending(x => x.CreationTime).ToList();
+                while(journalFiles.Count > 3)
+                {
+                    journalFiles[3].Delete();
+                    journalFiles.RemoveAt(3);
+                }
             }
         }
         #endregion
@@ -331,8 +388,6 @@ namespace SimpleJournal
                     file.Save();
                 }
 
-                //_journalFilePath = sfd.FileName;
-                //NewEntry_Click(sender, e);
                 OpenJournalFile(sfd.FileName);
             }
         }
@@ -363,6 +418,30 @@ namespace SimpleJournal
         {
             Properties.Settings.Default["BackupOnExit"] = BackupOnExit.IsChecked;
             Properties.Settings.Default.Save();
+        }
+
+        private async void Find_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(_journalFilePath)) return;
+
+            // Get the term to find.
+            string term = TextPrompt.Prompt($"Find what?:", "Find", string.Empty, TextPrompt.InputType.Text);
+            if (string.IsNullOrWhiteSpace(term))
+                return;
+
+            using (ZipFile file = ZipFile.Read(_journalFilePath))
+            {
+                List<string> filesWithTerm = await SearchFilesInZip(file, term, _pw);
+
+                if (filesWithTerm?.Any() != true)
+                {
+                    MessageBox.Show("No results found!", "Search", MessageBoxButton.OK, MessageBoxImage.Asterisk);
+                    return;
+                }
+
+                // Put file names in list.
+                LoadFileList(filesWithTerm);
+            }
         }
 
         #endregion
