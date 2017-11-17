@@ -123,6 +123,7 @@ namespace SimpleJournal
                         }
                         
                         ms.Position = 0;
+                        entryTextBox.IsEnabled = true;
                         range.Load(ms, DataFormats.Rtf);
                     }
 
@@ -292,6 +293,8 @@ namespace SimpleJournal
         private void NewEntry_Click(object sender, RoutedEventArgs e)
         {
             if (string.IsNullOrWhiteSpace(_journalFilePath)) return;
+
+            entryTextBox.IsEnabled = true;
 
             SaveSelectedEntry(false);
 

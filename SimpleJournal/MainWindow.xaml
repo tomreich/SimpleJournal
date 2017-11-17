@@ -155,7 +155,7 @@
 
             </ToolBar>
 
-            <RichTextBox Grid.Row="2" x:Name="entryTextBox" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" SpellCheck.IsEnabled="True">
+            <RichTextBox Grid.Row="2" x:Name="entryTextBox" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" SpellCheck.IsEnabled="True" IsEnabled="False">
                 <RichTextBox.Resources>
                     <Style TargetType="{x:Type Paragraph}">
                         <Setter Property="Margin" Value="0"/>
