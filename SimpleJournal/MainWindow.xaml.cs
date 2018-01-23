@@ -18,11 +18,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
 using Ionic.Zip;
@@ -48,7 +46,7 @@ namespace SimpleJournal
         }
 
         #region Load Methods
-        private bool OpenJournalFile(string filePath)
+        private async Task<bool> OpenJournalFile(string filePath)
         {
             if (!File.Exists(filePath))
                 return false;
@@ -57,34 +55,8 @@ namespace SimpleJournal
             if (string.IsNullOrWhiteSpace(pass))
                 return false;
 
-            using (ZipFile file = ZipFile.Read(filePath))
-            {
-                // Get the file names in the zip.
-                var fileNames = GetFileNames(file);
-
-                if(fileNames?.Any() != true)
-                {
-                    MessageBox.Show("No entries found in file!", "Open", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return false;
-                }
-
-                // Try to open one of the files to verify the password is correct.
-                using (MemoryStream ms = new MemoryStream())
-                {
-                    try
-                    {
-                        file[0].ExtractWithPassword(ms, pass);
-                    }
-                    catch (BadPasswordException)
-                    {
-                        MessageBox.Show("Unable to load file.  Bad password?", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                        return false;
-                    }
-                }
-
-                // Put file names in list.
-                LoadFileList(fileNames);
-            }
+            // Put file names in list.
+            LoadFileList(await GetFileNamesAsync(filePath, pass));
 
             _pw = pass;
             _journalFilePath = filePath;
@@ -95,63 +67,126 @@ namespace SimpleJournal
         
         private void LoadFileList(List<string> allFiles, SelectedDatesCollection filter = null)
         {
-            // Put file names in list.
-            fileListBox.Items.Clear();
-            allFiles.Sort();
-            allFiles.Reverse();
-            _calendarReload = false;
-            entriesCalendar.SelectedDate = null;
-            foreach(string fileName in allFiles)
+            using (new WaitCursor())
             {
-                EntryFile entryFile = new EntryFile() { FileName = fileName };
-                if(entryFile.FileDateTime != DateTime.MinValue && (filter == null || filter.Contains(entryFile.FileDate)))
+                // Put file names in list.
+                fileListBox.Items.Clear();
+                allFiles.Sort();
+                allFiles.Reverse();
+                _calendarReload = false;
+                DateTime? filterDate = null;
+                if (filter?.Any() == true)
                 {
-                    fileListBox.Items.Add(entryFile);
-                    entriesCalendar.SelectedDates.Add(entryFile.FileDateTime);
+                    // Nulling the selected date will null out our filter, so save a copy.
+                    // Fortunately we know there can only be one, so...
+                    filterDate = filter[0];
+                }
+                entriesCalendar.SelectedDate = null;
+
+                foreach (string fileName in allFiles)
+                {
+                    EntryFile entryFile = new EntryFile() { FileName = fileName };
+                    if (entryFile.FileDateTime != DateTime.MinValue && (filterDate == null || filterDate.Value == entryFile.FileDate))
+                    {
+                        fileListBox.Items.Add(entryFile);
+                        entriesCalendar.SelectedDates.Add(entryFile.FileDateTime);
+                    }
                 }
             }
+
             _calendarReload = true;
         }
 
+        private async Task<List<string>> GetFileNamesAsync(string filePath, string pass)
+        {
+            List<string> fileNames = null;
+            using (new WaitCursor())
+            {
+                await Task.Run(() =>
+                {
+                    using (ZipFile file = ZipFile.Read(filePath))
+                    {
+                        // Get the file names in the zip.
+                        fileNames = GetFileNames(file);
+
+                        if (fileNames?.Any() != true)
+                            throw new Exception("No entries found in file!");
+
+                        // Try to open one of the files to verify the password is correct.
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            try
+                            {
+                                file[0].ExtractWithPassword(ms, pass);
+                            }
+                            catch (BadPasswordException)
+                            {
+                                throw new Exception("Unable to load file.  Bad password?");
+                            }
+                        }
+                    }
+                });
+            }
+            return fileNames;
+        }
+
+        
         private List<string> GetFileNames(ZipFile file)
         {
             List<string> ret = new List<string>();
             file.Entries.ToList().ForEach(x => ret.Add(x.FileName));
             return ret;
         }
+        
 
-        private bool LoadFileFromZip(ZipFile file, string fileName, string pw)
+        private async Task<List<string>> GetFileNamesAsync(string fileName)
         {
-            foreach (ZipEntry entry in file)
+            List<string> ret = new List<string>();
+            await Task.Run(() =>
             {
-                if (entry.FileName == fileName)
+                using (ZipFile file = ZipFile.Read(fileName))
                 {
-                    TextRange range = new TextRange(entryTextBox.Document.ContentStart, entryTextBox.Document.ContentEnd);
-                    using (MemoryStream ms = new MemoryStream())
-                    {
-                        try
-                        {
-                            entry.ExtractWithPassword(ms, pw);
-                        }
-                        catch (BadPasswordException)
-                        {
-                            MessageBox.Show("Unable to load entry.  Bad password?", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                            return false;
-                        }
-                        
-                        ms.Position = 0;
-                        entryTextBox.IsEnabled = true;
-                        range.Load(ms, DataFormats.Rtf);
-                    }
+                    file.Entries.ToList().ForEach(x => ret.Add(x.FileName));
+                }
+            });
+            return ret;
+        }
 
-                    using (MemoryStream ms = new MemoryStream())
-                    { 
-                        // Save bytes so we can do a comparison later to see if we need to save.
-                        ms.Position = 0;
-                        range.Save(ms, DataFormats.Rtf);
-                        _selectedFileBytes = ms.ToArray();
+        private async Task<bool> LoadFileFromZipAsync(string filePath, string fileName, string pw)
+        {
+            using (ZipFile file = ZipFile.Read(filePath))
+            {
+                foreach (ZipEntry entry in file)
+                {
+                    if (entry.FileName == fileName)
+                    {
+                        TextRange range = new TextRange(entryTextBox.Document.ContentStart, entryTextBox.Document.ContentEnd);
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            try
+                            {
+                                await Task.Run(() => entry.ExtractWithPassword(ms, pw));
+                            }
+                            catch (BadPasswordException)
+                            {
+                                MessageBox.Show("Unable to load entry.  Bad password?", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                                return false;
+                            }
+
+                            ms.Position = 0;
+                            entryTextBox.IsEnabled = true;
+                            range.Load(ms, DataFormats.Rtf);
+                        }
+
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            // Save bytes so we can do a comparison later to see if we need to save.
+                            ms.Position = 0;
+                            range.Save(ms, DataFormats.Rtf);
+                            _selectedFileBytes = ms.ToArray();
+                        }
+                        return true;
                     }
-                    return true;
                 }
             }
             return false;
@@ -167,7 +202,7 @@ namespace SimpleJournal
                 {
                     try
                     {
-                        entry.ExtractWithPassword(ms, pw);
+                        await Task.Run(() => entry.ExtractWithPassword(ms, pw));
                     }
                     catch (BadPasswordException)
                     {
@@ -181,7 +216,7 @@ namespace SimpleJournal
                     StreamReader sr = new StreamReader(ms);
                     string entryContents = await sr.ReadToEndAsync();
 
-                    if (entryContents.Contains(term))
+                    if (entryContents.ToLower().Contains(term.ToLower()))
                         ret.Add(entry.FileName);
                 }
             }
@@ -258,31 +293,23 @@ namespace SimpleJournal
         #endregion
 
         #region Calendar & File List Methods
-        private void Calendar_SelectAll_Click(object sender, RoutedEventArgs e)
+        private async void Calendar_SelectAll_Click(object sender, RoutedEventArgs e)
         {
             SaveSelectedEntry(false);
             _calendarReload = false;
-            using (ZipFile file = ZipFile.Read(_journalFilePath))
-            {
-                // Put file names in list.
-                LoadFileList(GetFileNames(file));
-            }
+            LoadFileList(await GetFileNamesAsync(_journalFilePath));
         }
 
-        private void Calendar_SelectedDatesChanged(object sender, SelectionChangedEventArgs e)
+        private async void Calendar_SelectedDatesChanged(object sender, SelectionChangedEventArgs e)
         {
             if (string.IsNullOrWhiteSpace(_journalFilePath)) return;
             if (!_calendarReload) return;
 
             SaveSelectedEntry(false);
-            using (ZipFile file = ZipFile.Read(_journalFilePath))
-            {
-                // Put file names in list.
-                LoadFileList(GetFileNames(file), entriesCalendar.SelectedDates);
-            }
+            LoadFileList(await GetFileNamesAsync(_journalFilePath), entriesCalendar.SelectedDates);
         }
 
-        private void fileListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private async void fileListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             SaveSelectedEntry(false);
 
@@ -290,23 +317,20 @@ namespace SimpleJournal
             {
                 _selectedFile = fileListBox.SelectedValue as EntryFile;
 
-                using (ZipFile file = ZipFile.Read(_journalFilePath))
-                {
-                    if(LoadFileFromZip(file, _selectedFile.FileName, _pw))
-                        TitleLabel.Content = _selectedFile.FileDateTime.ToString("dddd, MMMM d yyyy, hh:mm:ss tt");
-                }
+                if(await LoadFileFromZipAsync(_journalFilePath, _selectedFile.FileName, _pw))
+                    TitleLabel.Content = _selectedFile.FileDateTime.ToString("dddd, MMMM d yyyy, hh:mm:ss tt");
             }
         }
         #endregion
 
         #region Form Load & Unload
-        private void Window_Loaded(object sender, RoutedEventArgs e)
+        private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
             string defaultFile = Properties.Settings.Default["DefaultFile"].ToString();
             BackupOnExit.IsChecked = bool.Parse(Properties.Settings.Default["BackupOnExit"].ToString());
             if (!string.IsNullOrWhiteSpace(defaultFile) && File.Exists(defaultFile))
             {
-                OpenJournalFile(defaultFile);
+                await OpenJournalFile(defaultFile);
             }
         }
 
@@ -323,6 +347,7 @@ namespace SimpleJournal
                 var journalFiles = fi.Directory.GetFiles(fi.Name.Replace(fi.Extension, string.Empty) + "_*" + fi.Extension).OrderByDescending(x => x.CreationTime).ToList();
                 while(journalFiles.Count > 3)
                 {
+                    // TODO: Can we do this async?
                     journalFiles[3].Delete();
                     journalFiles.RemoveAt(3);
                 }
@@ -331,14 +356,14 @@ namespace SimpleJournal
         #endregion
 
         #region Menubar Click Actions
-        private void Open_Click(object sender, RoutedEventArgs e)
+        private async void Open_Click(object sender, RoutedEventArgs e)
         {
             OpenFileDialog ofd = new OpenFileDialog() { DefaultExt = ".zip", Filter = "Zip files (*.zip)|*.zip" };
             if (ofd.ShowDialog() == true)
             {
                 _selectedFile = null;
 
-                if (OpenJournalFile(ofd.FileName))
+                if (await OpenJournalFile(ofd.FileName))
                 {
                     Properties.Settings.Default["DefaultFile"] = _journalFilePath;
                     Properties.Settings.Default.Save();
@@ -347,7 +372,7 @@ namespace SimpleJournal
         }
 
 
-        private void NewEntry_Click(object sender, RoutedEventArgs e)
+        private async void NewEntry_Click(object sender, RoutedEventArgs e)
         {
             if (string.IsNullOrWhiteSpace(_journalFilePath)) return;
 
@@ -355,17 +380,14 @@ namespace SimpleJournal
 
             SaveSelectedEntry(false);
 
-            using (MemoryStream ms = new MemoryStream())
-            {
-                using (ZipFile file = ZipFile.Read(_journalFilePath))
-                {
-                    file.AddEntry(DateTime.Now.ToString("s").Replace(':', '_') + ".rtf", "{\\rtf1}");
-                    file.Save();
-                    LoadFileList(GetFileNames(file));
-                }
-                fileListBox.SelectedIndex = 0;
-                FocusManager.SetFocusedElement(entryGrid, entryTextBox);
-            }
+            await AddNewEntry(_journalFilePath);
+            List<string> fileNames = await GetFileNamesAsync(_journalFilePath, _pw);
+
+            // Put file names in list.
+            LoadFileList(fileNames);
+
+            fileListBox.SelectedIndex = 0;
+            FocusManager.SetFocusedElement(entryGrid, entryTextBox);
         }
 
         private void Exit_Click(object sender, RoutedEventArgs e)
@@ -378,20 +400,29 @@ namespace SimpleJournal
             SaveSelectedEntry(true);
         }
 
-        private void New_Click(object sender, RoutedEventArgs e)
+        private async void New_Click(object sender, RoutedEventArgs e)
         {
             SaveFileDialog sfd = new SaveFileDialog() { DefaultExt = ".zip", Filter = "Zip files (*.zip)|*.zip" };
             if (sfd.ShowDialog() == true)
             {
                 _selectedFile = null;
+                await AddNewEntry(sfd.FileName);
+                await OpenJournalFile(sfd.FileName);
+            }
+        }
 
-                using (ZipFile file = new ZipFile(sfd.FileName))
+        private async Task AddNewEntry(string fileName)
+        {
+            using (new WaitCursor())
+            {
+                await Task.Run(() =>
                 {
-                    file.AddEntry(DateTime.Now.ToString("s").Replace(':', '_') + ".rtf", "{\\rtf1}");
-                    file.Save();
-                }
-
-                OpenJournalFile(sfd.FileName);
+                    using (ZipFile file = new ZipFile(fileName))
+                    {
+                        file.AddEntry(DateTime.Now.ToString("s").Replace(':', '_') + ".rtf", "{\\rtf1}");
+                        file.Save();
+                    }
+                });
             }
         }
 
@@ -434,7 +465,9 @@ namespace SimpleJournal
 
             using (ZipFile file = ZipFile.Read(_journalFilePath))
             {
-                List<string> filesWithTerm = await SearchFilesInZip(file, term, _pw);
+                List<string> filesWithTerm;
+                using (new WaitCursor())
+                    filesWithTerm = await SearchFilesInZip(file, term, _pw);
 
                 if (filesWithTerm?.Any() != true)
                 {
@@ -447,6 +480,31 @@ namespace SimpleJournal
             }
         }
 
+        #endregion
+
+        #region Wait Cursor
+        // Blatantly stolen from Stack overflow
+        // https://stackoverflow.com/questions/3480966/display-hourglass-when-application-is-busy
+        public class WaitCursor : IDisposable
+        {
+            private Cursor _previousCursor;
+
+            public WaitCursor()
+            {
+                _previousCursor = Mouse.OverrideCursor;
+
+                Mouse.OverrideCursor = Cursors.Wait;
+            }
+
+            #region IDisposable Members
+
+            public void Dispose()
+            {
+                Mouse.OverrideCursor = _previousCursor;
+            }
+
+            #endregion
+        }
         #endregion
     }
 }
