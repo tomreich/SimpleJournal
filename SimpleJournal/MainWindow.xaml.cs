@@ -475,6 +475,8 @@ namespace SimpleJournal
                     return;
                 }
 
+                MessageBox.Show($"Found {filesWithTerm.Count} files containing \"{term}\"!");
+
                 // Put file names in list.
                 LoadFileList(filesWithTerm);
             }
