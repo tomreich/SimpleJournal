@@ -29,7 +29,7 @@ using System.Windows;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Tom Reich")]
 [assembly: AssemblyProduct("Simple Journal")]
-[assembly: AssemblyCopyright("Copyright ©  2018")]
+//[assembly: AssemblyCopyright("Copyright ©  2019")] // Generated in AssemblyInfoGenerated.tt
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -68,5 +68,4 @@ using System.Windows;
 // You can specify all the values or you can default the Build and Revision Numbers
 // by using the '*' as shown below:
 // [assembly: AssemblyVersion("1.0.*")]
-[assembly: AssemblyVersion("18.1.23.1")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+//[assembly: AssemblyVersion("1.0.*")] // Generated in AssemblyInfoGenerated.tt
